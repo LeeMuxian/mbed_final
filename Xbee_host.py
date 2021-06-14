@@ -10,21 +10,13 @@ print('Start Communication, sending RPC')
 send = 'start'
 s.write("/xbee_start/run\n".encode())
 while send!='stop':
-    print('Sent RPC')
+    #print('Sent RPC')
     send = s.readline()
-    if (send =='circle'):
+    print(send)
+    if (send == b'circle'):
         # send to remote
         s.write("/circle/run\n".encode())
-        '''
-        line = s.read(20)
-        
-        if len(line) < 20:
-            print('No response')
-        else:
-            print(line.decode())
-        print('')
-        ''' 
-    elif (send == 'parking'):
+    elif (send == b'parking'):
         # send to remote
         s.write("/parking/run 5 5 west\n".encode())
 

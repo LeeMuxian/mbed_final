@@ -10,14 +10,17 @@ BufferedSerial xbee(A1,A0); //tx,rx
 BBCar car(pin5, pin6, servo_ticker);
 
 DigitalInOut ping(D10);
-Timer t;
+Timer t, t_line;
 
 void xbee_start(Arguments *in, Reply *out);
 RPCFunction Xbee_start(&xbee_start, "xbee_start");
-bool start = false, line = true;
+// bool start = false;
 
 void line_det(Arguments *in, Reply *out);
 RPCFunction Line_det(&line_det, "line_det");
+Thread thr_ping;
+void dis_check(void);
+float ping_dis = 1000;
 
 void circle(Arguments *in, Reply *out);
 RPCFunction Circle(&circle, "circle");
@@ -27,6 +30,9 @@ RPCFunction Parking(&parking, "parking");
 
 void calib(Arguments *in, Reply *out);
 RPCFunction Calib(&calib, "calib");
+
+void stop(Arguments *in, Reply *out);
+RPCFunction Stop(&stop, "stop");
 
 Thread thread;
 void xbee_RPC(void);
@@ -38,7 +44,10 @@ double speed_table1[] = {-8.530, -8.132, -8.690, -8.929, -4.824, 0.000, 4.829, 8
 
 int main() {
     thread.start(xbee_RPC);
+    //thr_ping.start(dis_check);
     
+    //t_line.start();
+
     car.setCalibTable(11, pwm_table0, speed_table0, 11, pwm_table1, speed_table1);
 
     char buf[256], outbuf[256];
@@ -83,19 +92,28 @@ void xbee_RPC(void) {
 }
 
 void xbee_start(Arguments *in, Reply *out) {
-    start = true;
-printf("111\r\n");
     char buf_uart[5] = "line";
     uart.write(buf_uart, 4);
 }
 
+int first = 0;
+
 void line_det(Arguments *in, Reply *out) {
-    if (start == true && line == true) {
+    //if (t_line.read() < 20) {
+
         double x1 = in->getArg<double>();
         double y1 = in->getArg<double>();
         double x2 = in->getArg<double>();
         double y2 = in->getArg<double>();
 
+
+        if (first == 0) {
+            car.goStraight(100);
+            ThisThread::sleep_for(1s);
+            car.stop();
+            first++;
+            return;
+        }
         if (x2 > 85) {          // turn left
             car.turn(80, 0.7);
             ThisThread::sleep_for(100ms);
@@ -105,39 +123,20 @@ void line_det(Arguments *in, Reply *out) {
             ThisThread::sleep_for(100ms);
             car.stop();
         } else {                // go straight
-            car.goStraightCalib(9);
+            car.goStraight(100);
             ThisThread::sleep_for(100ms);
             car.stop();
         }
+}
 
-        float val;
-        
-        ping.output();
-        ping = 0; wait_us(200);
-        ping = 1; wait_us(5);
-        ping = 0; wait_us(5);
+void stop(Arguments *in, Reply *out) {
+    car.stop();
 
-        ping.input();
-        while(ping.read() == 0);
-        t.start();
-        while(ping.read() == 1);
-        val = t.read();
-        printf("Ping = %lf\r\n", val*17700.4f);
-        t.stop();
-        t.reset();
+    ThisThread::sleep_for(5s);
 
-        ThisThread::sleep_for(10ms);
+    char buf_xbee[8] = "\ncircle";
 
-        if (val*17700.4f < 4.3) {
-            line = false;
-
-            ThisThread::sleep_for(300ms);
-            char buf_uart[5] = "stop", buf_xbee[7] = "circle";
-
-            uart.write(buf_uart, 4);
-            xbee.write(buf_xbee, 6);
-        }
-    }
+    xbee.write(buf_xbee, 7);
 }
 
 void circle(Arguments *in, Reply *out) {
@@ -146,7 +145,7 @@ void circle(Arguments *in, Reply *out) {
     {
         // 90 degree
         car.turn(100, 0.01);
-        ThisThread::sleep_for(135ms);
+        ThisThread::sleep_for(1030ms);
         car.stop();
 
         // Circle
@@ -157,7 +156,7 @@ void circle(Arguments *in, Reply *out) {
         flag++;
 
         // Straight
-        car.goStraight(50);
+        car.goStraight(60);
         while(1)
         {
             float val;
@@ -172,16 +171,19 @@ void circle(Arguments *in, Reply *out) {
             t.start();
             while(ping.read() == 1);
             val = t.read();
-            printf("Ping = %lf\r\n", val*17700.4f);\
+            printf("Ping = %lf\r\n", val*17700.4f);
             t.stop();
             t.reset();
-            if(val < 70) break;
+            if(val*17700.4f < 70) break;
+
+            char buf_xbee[6] = "\nloop";
+            xbee.write(buf_xbee, 5);
         }
         car.stop();
 
         ThisThread::sleep_for(500ms);
-        char buf_xbee[7] = "circle";
-        xbee.write(buf_xbee, 6);
+        char buf_xbee[8] = "\ncircle";
+        xbee.write(buf_xbee, 7);
     }
     else if(flag == 1)
     {
@@ -191,8 +193,8 @@ void circle(Arguments *in, Reply *out) {
         flag--;
 
         ThisThread::sleep_for(500ms);
-        char buf_xbee[8] = "parking";
-        xbee.write(buf_xbee, 7);
+        char buf_xbee[9] = "\nparking";
+        xbee.write(buf_xbee, 8);
     }
     return;
 }
@@ -206,7 +208,7 @@ void parking(Arguments *in, Reply *out) {
     // about 12.7cm(length) * 12.3cm(width)
 
     car.goStraightCalib(-6);
-    ThisThread::sleep_for((d2 / 6) * 1000);
+    ThisThread::sleep_for((d2 / 6) * 1500);
     car.stop();
     
     ThisThread::sleep_for(500ms);
@@ -221,13 +223,13 @@ void parking(Arguments *in, Reply *out) {
     ThisThread::sleep_for(500ms);
 
     car.goStraightCalib(-6);
-    ThisThread::sleep_for((d1 / 6) * 1000);
+    ThisThread::sleep_for((d1 / 6) * 1200);
     car.stop();
     ThisThread::sleep_for(500ms);
 
-    char buf_uart[6] = "calib", buf_xbee[5] = "stop";
+    char buf_uart[6] = "calib", buf_xbee[6] = "\nstop";
     uart.write(buf_uart, 5);
-    xbee.write(buf_xbee, 4);
+    xbee.write(buf_xbee, 5);
 }
 
 void calib(Arguments *in, Reply *out) {
@@ -313,3 +315,27 @@ void calib(Arguments *in, Reply *out) {
 
     ThisThread::sleep_for(10ms);
 }
+
+/*void dis_check(void) {
+    while (1) {
+        printf("hi\r\n");
+        float val;
+        
+        ping.output();
+        ping = 0; wait_us(200);
+        ping = 1; wait_us(5);
+        ping = 0; wait_us(5);
+
+        ping.input();
+        while(ping.read() == 0);
+        t.start();
+        while(ping.read() == 1);
+        val = t.read();
+        ping_dis = val*17700.4f;
+        printf("Ping = %lf\r\n", ping_dis);
+        t.stop();
+        t.reset();
+
+        ThisThread::sleep_for(10ms);
+    }
+}*/
